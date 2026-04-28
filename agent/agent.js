@@ -1,17 +1,16 @@
 // ============================================================
-// EmpMonitor Windows Agent — Standalone (pkg-compatible)
+// EmpMonitor Windows Agent v2.1 — CommonJS (works on all Node.js versions)
 // ============================================================
-// This is a lightweight Node.js agent that runs on Windows PCs.
-// It uses PowerShell for native Windows features (no native npm deps).
-// Package with: npx pkg agent.js -t node18-win-x64 -o EmpMonitor.exe
+// Run: node agent.js "http://SERVER_IP:3001" "Employee Name" "AdminPassword"
 // ============================================================
 
-import { exec, execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import https from 'https';
-import http from 'http';
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const https = require('https');
+const http = require('http');
+const crypto = require('crypto');
 
 // ============================================================
 // CONFIGURATION
@@ -25,24 +24,22 @@ const LOG_FILE = path.join(CONFIG_DIR, 'agent.log');
 if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
 if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-// Default config
 let config = {
   serverUrl: process.argv[2] || 'http://localhost:3001',
   deviceId: null,
   employeeName: process.argv[3] || os.hostname(),
   agentPassword: process.argv[4] || 'admin@123',
-  trackingInterval: 5,      // seconds
-  screenshotInterval: 300,   // 5 minutes
-  uploadInterval: 30,        // 30 seconds
-  idleThreshold: 120,        // 2 minutes
+  trackingInterval: 5,
+  screenshotInterval: 300,
+  uploadInterval: 30,
+  idleThreshold: 120,
 };
 
-// Load saved config
 if (fs.existsSync(CONFIG_FILE)) {
   try {
     const saved = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    config = { ...config, ...saved };
-  } catch (e) { /* use defaults */ }
+    config = Object.assign({}, config, saved);
+  } catch (e) {}
 }
 
 function saveConfig() {
@@ -50,87 +47,86 @@ function saveConfig() {
 }
 
 function log(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}`;
+  const line = '[' + new Date().toISOString() + '] ' + msg;
   console.log(line);
   try {
     fs.appendFileSync(LOG_FILE, line + '\n');
-    // Keep log file under 5MB
     const stats = fs.statSync(LOG_FILE);
     if (stats.size > 5 * 1024 * 1024) {
       const content = fs.readFileSync(LOG_FILE, 'utf8');
       fs.writeFileSync(LOG_FILE, content.slice(content.length / 2));
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
 // ============================================================
-// HTTP CLIENT (no dependencies needed)
+// HTTP CLIENT
 // ============================================================
-function httpRequest(url, method = 'GET', body = null) {
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === 'https:' ? https : http;
-    const options = {
+function httpRequest(url, method, body) {
+  return new Promise(function(resolve, reject) {
+    var parsedUrl = new URL(url);
+    var client = parsedUrl.protocol === 'https:' ? https : http;
+    var options = {
       hostname: parsedUrl.hostname,
-      port: parsedUrl.port,
+      port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
       path: parsedUrl.pathname + parsedUrl.search,
-      method,
+      method: method || 'GET',
       headers: { 'Content-Type': 'application/json' },
     };
 
-    const req = client.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
+    var req = client.request(options, function(res) {
+      var data = '';
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() {
         try { resolve({ status: res.statusCode, data: JSON.parse(data) }); }
-        catch { resolve({ status: res.statusCode, data }); }
+        catch (e) { resolve({ status: res.statusCode, data: data }); }
       });
     });
 
     req.on('error', reject);
-    req.setTimeout(10000, () => { req.destroy(); reject(new Error('Timeout')); });
+    req.setTimeout(10000, function() { req.destroy(); reject(new Error('Timeout')); });
     if (body) req.write(JSON.stringify(body));
     req.end();
   });
 }
 
-// Upload file via multipart form (for screenshots)
-function uploadFile(url, filepath, fields = {}) {
-  return new Promise((resolve, reject) => {
-    const boundary = `----FormBoundary${Date.now()}`;
-    const parsedUrl = new URL(url);
-    const client = parsedUrl.protocol === 'https:' ? https : http;
-    const filename = path.basename(filepath);
-    const fileData = fs.readFileSync(filepath);
+// Upload screenshot via multipart
+function uploadFile(url, filepath, fields) {
+  return new Promise(function(resolve, reject) {
+    var boundary = '----FormBoundary' + Date.now();
+    var parsedUrl = new URL(url);
+    var client = parsedUrl.protocol === 'https:' ? https : http;
+    var filename = path.basename(filepath);
+    var fileData = fs.readFileSync(filepath);
 
-    let body = '';
-    for (const [key, val] of Object.entries(fields)) {
-      body += `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${val}\r\n`;
-    }
-    const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="screenshot"; filename="${filename}"\r\nContent-Type: image/png\r\n\r\n`;
-    const fileFooter = `\r\n--${boundary}--\r\n`;
+    var body = '';
+    Object.keys(fields || {}).forEach(function(key) {
+      body += '--' + boundary + '\r\nContent-Disposition: form-data; name="' + key + '"\r\n\r\n' + fields[key] + '\r\n';
+    });
+    var fileHeader = '--' + boundary + '\r\nContent-Disposition: form-data; name="screenshot"; filename="' + filename + '"\r\nContent-Type: image/png\r\n\r\n';
+    var fileFooter = '\r\n--' + boundary + '--\r\n';
 
-    const bodyBuffer = Buffer.concat([
+    var bodyBuffer = Buffer.concat([
       Buffer.from(body + fileHeader),
       fileData,
       Buffer.from(fileFooter)
     ]);
 
-    const options = {
+    var options = {
       hostname: parsedUrl.hostname,
-      port: parsedUrl.port,
+      port: parsedUrl.port || 80,
       path: parsedUrl.pathname,
       method: 'POST',
       headers: {
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Type': 'multipart/form-data; boundary=' + boundary,
         'Content-Length': bodyBuffer.length,
       },
     };
 
-    const req = client.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, data }));
+    var req = client.request(options, function(res) {
+      var data = '';
+      res.on('data', function(c) { data += c; });
+      res.on('end', function() { resolve({ status: res.statusCode, data: data }); });
     });
     req.on('error', reject);
     req.write(bodyBuffer);
@@ -141,201 +137,186 @@ function uploadFile(url, filepath, fields = {}) {
 // ============================================================
 // OFFLINE QUEUE
 // ============================================================
-let eventQueue = [];
-let screenshotQueue = [];
+var eventQueue = [];
+var screenshotQueue = [];
 
 function loadQueue() {
   try {
     if (fs.existsSync(QUEUE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
+      var data = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
       eventQueue = data.events || [];
       screenshotQueue = data.screenshots || [];
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
 function saveQueue() {
   try {
     fs.writeFileSync(QUEUE_FILE, JSON.stringify({ events: eventQueue, screenshots: screenshotQueue }));
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
 }
 
 // ============================================================
 // DEVICE REGISTRATION
 // ============================================================
-async function registerDevice() {
-  if (config.deviceId) {
-    log(`Device already registered: ${config.deviceId}`);
-    return;
-  }
+function registerDevice() {
+  return new Promise(function(resolve) {
+    if (config.deviceId) {
+      log('Device already registered: ' + config.deviceId);
+      resolve();
+      return;
+    }
 
-  try {
-    const res = await httpRequest(`${config.serverUrl}/api/devices/register`, 'POST', {
+    httpRequest(config.serverUrl + '/api/devices/register', 'POST', {
       hostname: os.hostname(),
-      os: `Windows ${os.release()}`,
+      os: 'Windows ' + os.release(),
       employeeName: config.employeeName,
       agentVersion: '2.1.0',
       agentPassword: config.agentPassword,
-    });
-
-    if (res.status === 201) {
-      config.deviceId = res.data.deviceId;
+    }).then(function(res) {
+      if (res.status === 201) {
+        config.deviceId = res.data.deviceId;
+        saveConfig();
+        log('✅ Registered as ' + config.deviceId);
+      } else {
+        log('❌ Registration failed: ' + JSON.stringify(res.data));
+        // Use a local ID so we can still queue data
+        config.deviceId = 'LOCAL-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+        saveConfig();
+      }
+      resolve();
+    }).catch(function(err) {
+      log('❌ Cannot reach server: ' + err.message);
+      config.deviceId = 'LOCAL-' + crypto.randomBytes(4).toString('hex').toUpperCase();
       saveConfig();
-      log(`✅ Registered as ${config.deviceId}`);
-    } else {
-      log(`❌ Registration failed: ${JSON.stringify(res.data)}`);
-    }
-  } catch (err) {
-    log(`❌ Registration error: ${err.message}`);
-  }
+      resolve();
+    });
+  });
 }
 
 // ============================================================
 // ACTIVE WINDOW TRACKING (PowerShell)
 // ============================================================
-let currentApp = null;
-let currentTitle = null;
-let sessionStart = null;
+var currentApp = null;
+var currentTitle = null;
+var sessionStart = null;
 
 function getActiveWindow() {
-  return new Promise((resolve) => {
-    // PowerShell command to get the active window title and process name
-    const cmd = `powershell -NoProfile -Command "
-      Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class Win32 {
-  [DllImport(\\"user32.dll\\")]
-  public static extern IntPtr GetForegroundWindow();
-  [DllImport(\\"user32.dll\\")]
-  public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport(\\"user32.dll\\", SetLastError=true)]
-  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-}
-'@
-      $hwnd = [Win32]::GetForegroundWindow()
-      $sb = New-Object System.Text.StringBuilder 256
-      [Win32]::GetWindowText($hwnd, $sb, 256) | Out-Null
-      $title = $sb.ToString()
-      $pid = 0
-      [Win32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
-      $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
-      Write-Output \\"$($proc.ProcessName)|$title\\"
-    "`;
+  return new Promise(function(resolve) {
+    var cmd = 'powershell -NoProfile -NonInteractive -Command "' +
+      'try {' +
+      'Add-Type -AssemblyName System.Windows.Forms;' +
+      '$hwnd = [System.Windows.Forms.Form]::ActiveForm;' +
+      '$proc = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object CPU -Descending | Select-Object -First 1;' +
+      'Write-Output ($proc.ProcessName + \\"|\\\" + $proc.MainWindowTitle)' +
+      '} catch { Write-Output \\"explorer|Desktop\\" }"';
 
-    exec(cmd, { timeout: 5000 }, (err, stdout) => {
-      if (err) { resolve(null); return; }
-      const [processName, ...titleParts] = stdout.trim().split('|');
+    exec(cmd, { timeout: 5000 }, function(err, stdout) {
+      if (err || !stdout.trim()) { resolve(null); return; }
+      var parts = stdout.trim().split('|');
       resolve({
-        appName: processName || 'Unknown',
-        windowTitle: titleParts.join('|') || 'Unknown',
+        appName: parts[0] || 'Unknown',
+        windowTitle: parts.slice(1).join('|') || 'Unknown',
       });
     });
   });
 }
 
 function categorizeApp(appName) {
-  const name = (appName || '').toLowerCase();
-  const productive = ['code', 'devenv', 'idea', 'pycharm', 'webstorm', 'cmd', 'powershell', 'windowsterminal', 'slack', 'teams', 'outlook', 'excel', 'winword', 'powerpnt', 'figma', 'postman', 'notion'];
-  const unproductive = ['spotify', 'whatsapp', 'telegram', 'discord', 'steam', 'vlc'];
-  if (productive.some(p => name.includes(p))) return 'productive';
-  if (unproductive.some(u => name.includes(u))) return 'unproductive';
+  var name = (appName || '').toLowerCase();
+  var productive = ['code', 'devenv', 'idea', 'pycharm', 'webstorm', 'cmd', 'powershell', 'windowsterminal', 'slack', 'teams', 'outlook', 'excel', 'winword', 'powerpnt', 'figma', 'postman', 'notion', 'chrome', 'msedge', 'firefox'];
+  var unproductive = ['spotify', 'whatsapp', 'telegram', 'discord', 'steam', 'vlc', 'netflix'];
+  if (productive.some(function(p) { return name.includes(p); })) return 'productive';
+  if (unproductive.some(function(u) { return name.includes(u); })) return 'unproductive';
   if (name === 'idle') return 'idle';
   return 'neutral';
 }
 
-async function trackWindow() {
-  const win = await getActiveWindow();
-  if (!win) return;
+function trackWindow() {
+  return getActiveWindow().then(function(win) {
+    if (!win) return;
 
-  if (win.appName === currentApp && win.windowTitle === currentTitle) return;
+    if (win.appName === currentApp && win.windowTitle === currentTitle) return;
 
-  // Save previous session
-  if (currentApp && sessionStart) {
-    const duration = Math.floor((Date.now() - sessionStart) / 1000);
-    if (duration >= 3) {
-      eventQueue.push({
-        deviceId: config.deviceId,
-        appName: currentApp,
-        windowTitle: currentTitle,
-        category: categorizeApp(currentApp),
-        duration,
-        timestamp: new Date(sessionStart).toISOString(),
-        endTime: new Date().toISOString(),
-        icon: '📱',
-      });
+    if (currentApp && sessionStart) {
+      var duration = Math.floor((Date.now() - sessionStart) / 1000);
+      if (duration >= 3) {
+        eventQueue.push({
+          deviceId: config.deviceId,
+          appName: currentApp,
+          windowTitle: currentTitle,
+          category: categorizeApp(currentApp),
+          duration: duration,
+          timestamp: new Date(sessionStart).toISOString(),
+          endTime: new Date().toISOString(),
+          icon: '📱',
+        });
+      }
     }
-  }
 
-  currentApp = win.appName;
-  currentTitle = win.windowTitle;
-  sessionStart = Date.now();
+    currentApp = win.appName;
+    currentTitle = win.windowTitle;
+    sessionStart = Date.now();
+  }).catch(function() {});
 }
 
 // ============================================================
 // SCREENSHOT CAPTURE (PowerShell)
 // ============================================================
 function captureScreenshot() {
-  return new Promise((resolve) => {
-    const filename = `ss_${Date.now()}.png`;
-    const filepath = path.join(SCREENSHOT_DIR, filename);
+  var filename = 'ss_' + Date.now() + '.png';
+  var filepath = path.join(SCREENSHOT_DIR, filename);
+  var safePath = filepath.replace(/\\/g, '\\\\');
 
-    const cmd = `powershell -NoProfile -Command "
-      Add-Type -AssemblyName System.Windows.Forms
-      Add-Type -AssemblyName System.Drawing
-      $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-      $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
-      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-      $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-      $bitmap.Save('${filepath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png)
-      $graphics.Dispose()
-      $bitmap.Dispose()
-    "`;
+  var cmd = 'powershell -NoProfile -NonInteractive -Command "' +
+    'Add-Type -AssemblyName System.Windows.Forms;' +
+    'Add-Type -AssemblyName System.Drawing;' +
+    '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;' +
+    '$b = New-Object System.Drawing.Bitmap($s.Width, $s.Height);' +
+    '$g = [System.Drawing.Graphics]::FromImage($b);' +
+    '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size);' +
+    '$b.Save(\\\"' + safePath + '\\\", [System.Drawing.Imaging.ImageFormat]::Png);' +
+    '$g.Dispose(); $b.Dispose()"';
 
-    exec(cmd, { timeout: 15000 }, (err) => {
-      if (err) { log(`Screenshot error: ${err.message}`); resolve(null); return; }
-      if (fs.existsSync(filepath)) {
-        screenshotQueue.push({
-          filepath,
-          appName: currentApp || 'Unknown',
-          windowTitle: currentTitle || '',
-        });
-        log(`📸 Screenshot captured: ${filename}`);
-        resolve(filepath);
-      } else {
-        resolve(null);
-      }
-    });
+  exec(cmd, { timeout: 20000 }, function(err) {
+    if (err) { log('Screenshot error: ' + err.message); return; }
+    if (fs.existsSync(filepath)) {
+      screenshotQueue.push({
+        filepath: filepath,
+        appName: currentApp || 'Unknown',
+        windowTitle: currentTitle || '',
+      });
+      log('📸 Screenshot captured: ' + filename);
+      // Clean up old screenshots (keep last 20)
+      try {
+        var files = fs.readdirSync(SCREENSHOT_DIR);
+        if (files.length > 20) {
+          files.sort().slice(0, files.length - 20).forEach(function(f) {
+            try { fs.unlinkSync(path.join(SCREENSHOT_DIR, f)); } catch (e) {}
+          });
+        }
+      } catch (e) {}
+    }
   });
 }
 
 // ============================================================
 // IDLE DETECTION (PowerShell)
 // ============================================================
-let isIdle = false;
+var isIdle = false;
 
 function checkIdle() {
-  return new Promise((resolve) => {
-    const cmd = `powershell -NoProfile -Command "
-      Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
-public class IdleTime {
-  [DllImport(\\"user32.dll\\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
-  public static uint Get() {
-    LASTINPUTINFO lii = new LASTINPUTINFO();
-    lii.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
-    GetLastInputInfo(ref lii);
-    return ((uint)Environment.TickCount - lii.dwTime) / 1000;
-  }
-}
-'@
-      Write-Output ([IdleTime]::Get())
-    "`;
+  return new Promise(function(resolve) {
+    var cmd = 'powershell -NoProfile -NonInteractive -Command "' +
+      'Add-Type @\\"\\nusing System;\\nusing System.Runtime.InteropServices;\\n' +
+      'public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }\\n' +
+      'public class IdleTime {\\n' +
+      '  [DllImport(\\\\\\"user32.dll\\\\\\")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO p);\\n' +
+      '  public static uint Get() { LASTINPUTINFO l = new LASTINPUTINFO(); l.cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf(l); GetLastInputInfo(ref l); return ((uint)Environment.TickCount - l.dwTime)/1000; }\\n' +
+      '}\\n\\"@\\n' +
+      'Write-Output ([IdleTime]::Get())"';
 
-    exec(cmd, { timeout: 5000 }, (err, stdout) => {
+    exec(cmd, { timeout: 5000 }, function(err, stdout) {
       if (err) { resolve(0); return; }
       resolve(parseInt(stdout.trim()) || 0);
     });
@@ -345,57 +326,50 @@ public class IdleTime {
 // ============================================================
 // DATA UPLOAD
 // ============================================================
-async function uploadData() {
+function uploadData() {
   if (!config.deviceId) return;
 
-  // Check if device is still active
-  try {
-    const statusRes = await httpRequest(`${config.serverUrl}/api/devices/${config.deviceId}/status`);
-    if (statusRes.data && statusRes.data.active === false) {
-      log('⛔ Device has been removed by admin. Stopping agent.');
+  // Check if device still active
+  httpRequest(config.serverUrl + '/api/devices/' + config.deviceId + '/status').then(function(res) {
+    if (res.data && res.data.active === false) {
+      log('⛔ Device removed by admin. Stopping agent.');
       process.exit(0);
     }
-  } catch (e) { /* server unreachable, continue queuing */ }
+  }).catch(function() {});
 
   // Upload activity events
   if (eventQueue.length > 0) {
-    const batch = eventQueue.splice(0, 50);
-    try {
-      await httpRequest(`${config.serverUrl}/api/activity`, 'POST', {
-        deviceId: config.deviceId,
-        events: batch,
-      });
-      log(`📤 Uploaded ${batch.length} events`);
-    } catch (err) {
-      eventQueue.unshift(...batch); // re-queue on failure
-      log(`⚠️ Upload failed, ${eventQueue.length} events queued`);
-    }
+    var batch = eventQueue.splice(0, 50);
+    httpRequest(config.serverUrl + '/api/activity', 'POST', {
+      deviceId: config.deviceId,
+      events: batch,
+    }).then(function(res) {
+      log('📤 Uploaded ' + batch.length + ' events');
+    }).catch(function(err) {
+      eventQueue.unshift.apply(eventQueue, batch);
+      log('⚠️ Upload failed, queued: ' + eventQueue.length);
+    });
   }
 
-  // Upload screenshots
+  // Upload screenshot
   if (screenshotQueue.length > 0) {
-    const ss = screenshotQueue.shift();
-    try {
-      if (fs.existsSync(ss.filepath)) {
-        await uploadFile(`${config.serverUrl}/api/screenshots`, ss.filepath, {
-          deviceId: config.deviceId,
-          appName: ss.appName || '',
-          windowTitle: ss.windowTitle || '',
-        });
-        log(`📤 Uploaded screenshot`);
-        // Clean up local file
-        try { fs.unlinkSync(ss.filepath); } catch (e) { /* ignore */ }
-      }
-    } catch (err) {
-      screenshotQueue.unshift(ss);
-      log(`⚠️ Screenshot upload failed`);
+    var ss = screenshotQueue.shift();
+    if (ss && fs.existsSync(ss.filepath)) {
+      uploadFile(config.serverUrl + '/api/screenshots', ss.filepath, {
+        deviceId: config.deviceId,
+        appName: ss.appName || '',
+        windowTitle: ss.windowTitle || '',
+      }).then(function() {
+        log('📤 Uploaded screenshot');
+        try { fs.unlinkSync(ss.filepath); } catch (e) {}
+      }).catch(function(err) {
+        screenshotQueue.unshift(ss);
+      });
     }
   }
 
   // Heartbeat
-  try {
-    await httpRequest(`${config.serverUrl}/api/devices/${config.deviceId}/heartbeat`, 'POST', {});
-  } catch (e) { /* ignore */ }
+  httpRequest(config.serverUrl + '/api/devices/' + config.deviceId + '/heartbeat', 'POST', {}).catch(function() {});
 
   saveQueue();
 }
@@ -403,18 +377,17 @@ async function uploadData() {
 // ============================================================
 // PASSWORD-PROTECTED SHUTDOWN
 // ============================================================
-// Prevent Ctrl+C without password
-process.on('SIGINT', () => {
-  console.log('\n⚠️ Enter admin password to stop agent (or wait 10s to cancel):');
+process.on('SIGINT', function() {
+  console.log('\n⚠️  Enter admin password to stop the agent:');
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
 
-  const timeout = setTimeout(() => {
-    console.log('❌ Shutdown cancelled.');
+  var timeout = setTimeout(function() {
+    console.log('❌ No password entered. Agent continues running.');
     process.stdin.pause();
-  }, 10000);
+  }, 15000);
 
-  process.stdin.once('data', (input) => {
+  process.stdin.once('data', function(input) {
     clearTimeout(timeout);
     if (input.trim() === config.agentPassword) {
       console.log('✅ Password correct. Shutting down...');
@@ -427,67 +400,50 @@ process.on('SIGINT', () => {
   });
 });
 
-// Prevent window close
-process.on('SIGHUP', () => { log('SIGHUP received — ignoring'); });
-
 // ============================================================
-// MAIN LOOP
+// MAIN
 // ============================================================
-async function main() {
+function main() {
   log('🚀 EmpMonitor Agent starting...');
-  log(`📡 Server: ${config.serverUrl}`);
-  log(`👤 Employee: ${config.employeeName}`);
+  log('📡 Server: ' + config.serverUrl);
+  log('👤 Employee: ' + config.employeeName);
 
   loadQueue();
 
-  // Register device
-  await registerDevice();
+  registerDevice().then(function() {
+    log('✅ Agent running — Device: ' + config.deviceId);
 
-  if (!config.deviceId) {
-    log('❌ Could not register device. Retrying in 30s...');
-    setTimeout(main, 30000);
-    return;
-  }
-
-  log(`✅ Agent running — Device: ${config.deviceId}`);
-  log(`   Tracking: every ${config.trackingInterval}s`);
-  log(`   Screenshots: every ${config.screenshotInterval}s`);
-  log(`   Uploads: every ${config.uploadInterval}s`);
-
-  // Start tracking loops
-  setInterval(async () => {
-    try {
-      const idleSeconds = await checkIdle();
-      if (idleSeconds >= config.idleThreshold) {
-        if (!isIdle) {
-          isIdle = true;
-          currentApp = 'Idle';
-          currentTitle = 'System Idle';
-          sessionStart = Date.now();
-          log(`💤 Idle detected (${idleSeconds}s)`);
+    // Track active window every 5 seconds
+    setInterval(function() {
+      checkIdle().then(function(idleSeconds) {
+        if (idleSeconds >= config.idleThreshold) {
+          if (!isIdle) {
+            isIdle = true;
+            currentApp = 'Idle';
+            currentTitle = 'System Idle';
+            sessionStart = Date.now();
+            log('💤 Idle: ' + idleSeconds + 's');
+          }
+        } else {
+          if (isIdle) { isIdle = false; log('🔄 Back from idle'); }
+          trackWindow();
         }
-      } else {
-        if (isIdle) {
-          isIdle = false;
-          log('🔄 Back from idle');
-        }
-        await trackWindow();
-      }
-    } catch (e) { /* ignore */ }
-  }, config.trackingInterval * 1000);
+      }).catch(function() { trackWindow(); });
+    }, config.trackingInterval * 1000);
 
-  // Screenshot timer
-  setInterval(() => {
-    if (!isIdle) captureScreenshot();
-  }, config.screenshotInterval * 1000);
+    // Screenshot every 5 minutes
+    setInterval(function() {
+      if (!isIdle) captureScreenshot();
+    }, config.screenshotInterval * 1000);
 
-  // Upload timer
-  setInterval(() => uploadData(), config.uploadInterval * 1000);
+    // Upload every 30 seconds
+    setInterval(uploadData, config.uploadInterval * 1000);
 
-  // Initial screenshot
-  setTimeout(() => captureScreenshot(), 5000);
+    // First screenshot after 10 seconds
+    setTimeout(captureScreenshot, 10000);
 
-  log('✅ All trackers started');
+    log('✅ All trackers started. Agent is monitoring.');
+  });
 }
 
 main();
