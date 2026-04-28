@@ -305,7 +305,7 @@ app.post('/api/devices/register', (req, res) => {
 
 // Remove device (admin only)
 app.delete('/api/devices/:id', (req, res) => {
-  db.prepare('UPDATE devices SET is_active = 0, status = "removed" WHERE id = ?').run(req.params.id);
+  db.prepare('UPDATE devices SET is_active = 0, status = ? WHERE id = ?').run('removed', req.params.id);
   io.emit('device:removed', { deviceId: req.params.id });
   res.json({ message: 'Device removed' });
 });
@@ -329,7 +329,7 @@ app.get('/api/devices/:id/status', (req, res) => {
 
 // Heartbeat
 app.post('/api/devices/:id/heartbeat', (req, res) => {
-  db.prepare('UPDATE devices SET status = "online", last_seen = ?, ip = ? WHERE id = ?').run(new Date().toISOString(), req.ip, req.params.id);
+  db.prepare('UPDATE devices SET status = ?, last_seen = ?, ip = ? WHERE id = ?').run('online', new Date().toISOString(), req.ip, req.params.id);
   io.emit('device:heartbeat', { deviceId: req.params.id, status: 'online' });
   const device = db.prepare('SELECT is_active FROM devices WHERE id = ?').get(req.params.id);
   res.json({ ok: true, active: device?.is_active === 1 });
