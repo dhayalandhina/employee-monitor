@@ -467,12 +467,20 @@ io.on('connection', (socket) => {
 const distPath = path.join(__dirname, '..', 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  // SPA fallback: serve index.html for all non-API routes
+  // SPA fallback: serve index.html for all non-API GET routes
   app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
     if (req.path.startsWith('/api/') || req.path.startsWith('/screenshots/') || req.path.startsWith('/socket.io/')) {
       return next();
     }
-    res.sendFile(path.join(distPath, 'index.html'));
+    const indexFile = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexFile)) {
+      res.sendFile(indexFile, (err) => {
+        if (err) next();
+      });
+    } else {
+      next();
+    }
   });
 }
 

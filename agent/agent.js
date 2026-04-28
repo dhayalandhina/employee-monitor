@@ -329,13 +329,17 @@ function checkIdle() {
 function uploadData() {
   if (!config.deviceId) return;
 
-  // Check if device still active
+  // Check if device still active on server
   httpRequest(config.serverUrl + '/api/devices/' + config.deviceId + '/status').then(function(res) {
     if (res.data && res.data.active === false) {
-      log('⛔ Device removed by admin. Stopping agent.');
-      process.exit(0);
+      log('⚠️ Device was removed by admin. Re-registering...');
+      config.deviceId = null;
+      saveConfig();
+      registerDevice();
     }
-  }).catch(function() {});
+  }).catch(function() {
+    // Server unreachable — keep queuing locally
+  });
 
   // Upload activity events
   if (eventQueue.length > 0) {
