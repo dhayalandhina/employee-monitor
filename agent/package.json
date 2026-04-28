@@ -1,0 +1,46 @@
+{
+  "name": "empmonitor-agent",
+  "version": "2.1.0",
+  "description": "Employee Monitoring Agent — Runs on employee Windows PCs to track activity, capture screenshots, and report to the admin dashboard.",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win",
+    "build:portable": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.empmonitor.agent",
+    "productName": "EmpMonitor Agent",
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "dependencies": {
+    "active-win": "^8.1.0",
+    "electron-store": "^8.1.0",
+    "node-fetch": "^3.3.2",
+    "screenshot-desktop": "^1.15.0",
+    "socket.io-client": "^4.8.3",
+    "uuid": "^14.0.0",
+    "auto-launch": "^5.0.6",
+    "systeminformation": "^5.23.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}
