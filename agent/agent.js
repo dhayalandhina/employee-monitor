@@ -476,13 +476,10 @@ function captureLiveFrame() {
       httpRequest(config.serverUrl + '/api/live/frame', 'POST', {
         deviceId: config.deviceId,
         frame: 'data:image/png;base64,' + base64,
-        appName: currentApp || 'Unknown',
+        appName: currentApp || 'Desktop',
         windowTitle: currentTitle || '',
-      }).then(function() {
-        log('📺 Live frame sent (' + Math.round(data.length/1024) + 'KB)');
-      }).catch(function(e) {
-        log('📺 Frame upload failed: ' + e.message);
-      });
+        isIdle: isIdle,
+      }).catch(function() {});
     } catch(e) {}
   });
 }

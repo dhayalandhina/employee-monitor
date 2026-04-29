@@ -497,9 +497,9 @@ app.get('/api/live/check/:deviceId', (req, res) => {
 
 // Agent sends a live frame (base64 screenshot)
 app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
-  const { deviceId, frame, appName, windowTitle } = req.body;
+  const { deviceId, frame, appName, windowTitle, isIdle } = req.body;
   if (!deviceId || !frame) return res.status(400).json({ error: 'Missing data' });
-  io.emit('live:frame', { deviceId, frame, appName: appName || '', windowTitle: windowTitle || '', timestamp: new Date().toISOString() });
+  io.emit('live:frame', { deviceId, frame, appName: appName || '', windowTitle: windowTitle || '', isIdle: isIdle || false, timestamp: new Date().toISOString() });
   res.json({ ok: true });
 });
 
@@ -507,14 +507,11 @@ app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
 io.on('connection', (socket) => {
   socket.on('live:watch', (deviceId) => {
     liveWatching.add(deviceId);
-    console.log(`👁️ Live watching: ${deviceId}`);
   });
   socket.on('live:stop', (deviceId) => {
     liveWatching.delete(deviceId);
-    console.log(`⏹️ Stopped watching: ${deviceId}`);
   });
   socket.on('disconnect', () => {
-    // Clean up if all admins disconnect
     if (io.engine.clientsCount === 0) {
       liveWatching.clear();
     }
