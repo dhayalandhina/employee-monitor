@@ -405,6 +405,76 @@ process.on('SIGINT', function() {
 });
 
 // ============================================================
+// LIVE STREAMING — Real-time screen capture
+// ============================================================
+var isLiveMode = false;
+var liveInterval = null;
+
+function checkLiveMode() {
+  if (!config.deviceId) return;
+  httpRequest(config.serverUrl + '/api/live/check/' + config.deviceId).then(function(res) {
+    if (res.data && res.data.live === true) {
+      if (!isLiveMode) {
+        isLiveMode = true;
+        log('🔴 LIVE MODE ON — Admin is watching');
+        startLiveStream();
+      }
+    } else {
+      if (isLiveMode) {
+        isLiveMode = false;
+        log('⏹️ LIVE MODE OFF');
+        stopLiveStream();
+      }
+    }
+  }).catch(function() {});
+}
+
+function startLiveStream() {
+  if (liveInterval) clearInterval(liveInterval);
+  // Capture and send every 2 seconds
+  liveInterval = setInterval(captureLiveFrame, 2000);
+  // Send first frame immediately
+  captureLiveFrame();
+}
+
+function stopLiveStream() {
+  if (liveInterval) {
+    clearInterval(liveInterval);
+    liveInterval = null;
+  }
+}
+
+function captureLiveFrame() {
+  // Capture screenshot as base64 (smaller size for speed — 50% quality JPEG)
+  var cmd = 'powershell -NoProfile -NonInteractive -Command "' +
+    'Add-Type -AssemblyName System.Windows.Forms;' +
+    'Add-Type -AssemblyName System.Drawing;' +
+    '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;' +
+    '$b = New-Object System.Drawing.Bitmap($s.Width, $s.Height);' +
+    '$g = [System.Drawing.Graphics]::FromImage($b);' +
+    '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size);' +
+    '$ms = New-Object System.IO.MemoryStream;' +
+    '$codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq \\\"image/jpeg\\\" };' +
+    '$params = New-Object System.Drawing.Imaging.EncoderParameters(1);' +
+    '$params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 40);' +
+    '$b.Save($ms, $codec, $params);' +
+    '[Convert]::ToBase64String($ms.ToArray());' +
+    '$g.Dispose(); $b.Dispose(); $ms.Dispose()"';
+
+  exec(cmd, { timeout: 5000, maxBuffer: 20 * 1024 * 1024 }, function(err, stdout) {
+    if (err || !stdout.trim()) return;
+    var base64 = stdout.trim();
+    // Send frame to server
+    httpRequest(config.serverUrl + '/api/live/frame', 'POST', {
+      deviceId: config.deviceId,
+      frame: 'data:image/jpeg;base64,' + base64,
+      appName: currentApp || 'Unknown',
+      windowTitle: currentTitle || '',
+    }).catch(function() {});
+  });
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 function main() {
@@ -435,19 +505,24 @@ function main() {
       }).catch(function() { trackWindow(); });
     }, config.trackingInterval * 1000);
 
-    // Screenshot every 5 minutes
+    // Screenshot every 5 minutes (for history)
     setInterval(function() {
       if (!isIdle) captureScreenshot();
     }, config.screenshotInterval * 1000);
 
-    // Upload every 30 seconds
+    // Upload activity data every 30 seconds
     setInterval(uploadData, config.uploadInterval * 1000);
+
+    // Check if admin is watching (live mode) every 3 seconds
+    setInterval(checkLiveMode, 3000);
 
     // First screenshot after 10 seconds
     setTimeout(captureScreenshot, 10000);
 
     log('✅ All trackers started. Agent is monitoring.');
+    log('📺 Live streaming ready — waiting for admin to watch.');
   });
 }
 
 main();
+

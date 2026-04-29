@@ -349,7 +349,8 @@ app.post('/api/activity', (req, res) => {
     });
   });
   transaction(items);
-  io.emit('activity:new', { deviceId, count: items.length });
+  const lastEvent = items[items.length - 1];
+  io.emit('activity:new', { deviceId, count: items.length, latest: { appName: lastEvent.appName, windowTitle: lastEvent.windowTitle, category: lastEvent.category, duration: lastEvent.duration, timestamp: lastEvent.timestamp } });
   res.status(201).json({ saved: items.length });
 });
 
@@ -378,7 +379,7 @@ app.post('/api/screenshots', uploadSS.single('screenshot'), (req, res) => {
   const id = uuidv4();
   const fileSize = req.file ? req.file.size : 0;
   db.prepare('INSERT INTO screenshots (id, device_id, employee_id, filename, app_name, window_title, timestamp, file_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, req.body.deviceId, req.body.employeeId || null, req.file?.filename || '', req.body.appName || '', req.body.windowTitle || '', new Date().toISOString(), fileSize);
-  io.emit('screenshot:new', { deviceId: req.body.deviceId });
+  io.emit('screenshot:new', { deviceId: req.body.deviceId, id, filename: req.file?.filename, appName: req.body.appName || '', windowTitle: req.body.windowTitle || '', timestamp: new Date().toISOString() });
   res.status(201).json({ id, filename: req.file?.filename });
 });
 
@@ -483,6 +484,42 @@ if (fs.existsSync(distPath)) {
     }
   });
 }
+
+// ============================================================
+// LIVE STREAMING
+// ============================================================
+const liveWatching = new Set(); // deviceIds being watched
+
+// Agent checks if it should stream
+app.get('/api/live/check/:deviceId', (req, res) => {
+  res.json({ live: liveWatching.has(req.params.deviceId) });
+});
+
+// Agent sends a live frame (base64 screenshot)
+app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
+  const { deviceId, frame, appName, windowTitle } = req.body;
+  if (!deviceId || !frame) return res.status(400).json({ error: 'Missing data' });
+  io.emit('live:frame', { deviceId, frame, appName: appName || '', windowTitle: windowTitle || '', timestamp: new Date().toISOString() });
+  res.json({ ok: true });
+});
+
+// Socket.io: dashboard tells server which device to watch
+io.on('connection', (socket) => {
+  socket.on('live:watch', (deviceId) => {
+    liveWatching.add(deviceId);
+    console.log(`👁️ Live watching: ${deviceId}`);
+  });
+  socket.on('live:stop', (deviceId) => {
+    liveWatching.delete(deviceId);
+    console.log(`⏹️ Stopped watching: ${deviceId}`);
+  });
+  socket.on('disconnect', () => {
+    // Clean up if all admins disconnect
+    if (io.engine.clientsCount === 0) {
+      liveWatching.clear();
+    }
+  });
+});
 
 // ============================================================
 // START
