@@ -445,32 +445,45 @@ function stopLiveStream() {
 }
 
 function captureLiveFrame() {
-  // Capture screenshot as base64 (smaller size for speed — 50% quality JPEG)
-  var cmd = 'powershell -NoProfile -NonInteractive -Command "' +
-    'Add-Type -AssemblyName System.Windows.Forms;' +
-    'Add-Type -AssemblyName System.Drawing;' +
-    '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;' +
-    '$b = New-Object System.Drawing.Bitmap($s.Width, $s.Height);' +
-    '$g = [System.Drawing.Graphics]::FromImage($b);' +
-    '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size);' +
-    '$ms = New-Object System.IO.MemoryStream;' +
-    '$codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq \\\"image/jpeg\\\" };' +
-    '$params = New-Object System.Drawing.Imaging.EncoderParameters(1);' +
-    '$params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 40);' +
-    '$b.Save($ms, $codec, $params);' +
-    '[Convert]::ToBase64String($ms.ToArray());' +
-    '$g.Dispose(); $b.Dispose(); $ms.Dispose()"';
+  var tmpFile = path.join(os.tmpdir(), 'empmon_live.png');
+  var psScript = path.join(os.tmpdir(), 'empmon_capture.ps1');
 
-  exec(cmd, { timeout: 5000, maxBuffer: 20 * 1024 * 1024 }, function(err, stdout) {
-    if (err || !stdout.trim()) return;
-    var base64 = stdout.trim();
-    // Send frame to server
-    httpRequest(config.serverUrl + '/api/live/frame', 'POST', {
-      deviceId: config.deviceId,
-      frame: 'data:image/jpeg;base64,' + base64,
-      appName: currentApp || 'Unknown',
-      windowTitle: currentTitle || '',
-    }).catch(function() {});
+  // Write PowerShell script to a file (avoids all escaping issues)
+  var script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    'Add-Type -AssemblyName System.Drawing',
+    '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
+    '$w = [Math]::Floor($s.Width / 2)',
+    '$h = [Math]::Floor($s.Height / 2)',
+    '$full = New-Object System.Drawing.Bitmap($s.Width, $s.Height)',
+    '$g = [System.Drawing.Graphics]::FromImage($full)',
+    '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size)',
+    '$thumb = New-Object System.Drawing.Bitmap($w, $h)',
+    '$g2 = [System.Drawing.Graphics]::FromImage($thumb)',
+    '$g2.DrawImage($full, 0, 0, $w, $h)',
+    '$thumb.Save("' + tmpFile.replace(/\\/g, '\\\\') + '", [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$g.Dispose(); $g2.Dispose(); $full.Dispose(); $thumb.Dispose()',
+  ].join('\n');
+
+  try { fs.writeFileSync(psScript, script); } catch(e) { return; }
+
+  exec('powershell -NoProfile -ExecutionPolicy Bypass -File "' + psScript + '"', { timeout: 5000 }, function(err) {
+    if (err) { log('Live capture error: ' + err.message); return; }
+    try {
+      if (!fs.existsSync(tmpFile)) return;
+      var data = fs.readFileSync(tmpFile);
+      var base64 = data.toString('base64');
+      httpRequest(config.serverUrl + '/api/live/frame', 'POST', {
+        deviceId: config.deviceId,
+        frame: 'data:image/png;base64,' + base64,
+        appName: currentApp || 'Unknown',
+        windowTitle: currentTitle || '',
+      }).then(function() {
+        log('📺 Live frame sent (' + Math.round(data.length/1024) + 'KB)');
+      }).catch(function(e) {
+        log('📺 Frame upload failed: ' + e.message);
+      });
+    } catch(e) {}
   });
 }
 
