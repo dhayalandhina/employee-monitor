@@ -6,7 +6,6 @@ export default function Dashboard({ apiBase }) {
   const [stats, setStats] = useState(null);
   const [trends, setTrends] = useState([]);
   const [devices, setDevices] = useState([]);
-  const [reports, setReports] = useState([]);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -14,9 +13,8 @@ export default function Dashboard({ apiBase }) {
       fetch(`${apiBase}/api/dashboard/stats`).then(r=>r.json()),
       fetch(`${apiBase}/api/dashboard/trends`).then(r=>r.json()),
       fetch(`${apiBase}/api/devices`).then(r=>r.json()),
-      fetch(`${apiBase}/api/reports/daily`).then(r=>r.json()),
-    ]).then(([s,t,d,r]) => {
-      setStats(s); setTrends(t); setDevices(d); setReports(r);
+    ]).then(([s,t,d]) => {
+      setStats(s); setTrends(t); setDevices(d);
     }).catch(console.error);
   }, [apiBase]);
 
@@ -25,12 +23,6 @@ export default function Dashboard({ apiBase }) {
     { name:'Idle', value:stats.idleDevices, color:'#f59e0b' },
     { name:'Offline', value:stats.offlineDevices, color:'#ef4444' },
   ] : [];
-
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return `${h}h ${m}m`;
-  };
 
   return (
     <>
@@ -150,9 +142,7 @@ export default function Dashboard({ apiBase }) {
                 </tr>
               </thead>
               <tbody>
-                {devices.slice(0,5).map(dev => {
-                  const report = reports.find(r=>r.deviceId===dev.id);
-                  return (
+                {devices.slice(0,5).map(dev => (
                     <tr key={dev.id}>
                       <td>
                         <div className="device-cell">
@@ -163,11 +153,13 @@ export default function Dashboard({ apiBase }) {
                           </div>
                         </div>
                       </td>
-                      <td style={{color:'var(--text-primary)',fontWeight:500}}>{dev.employeeName || '—'}</td>
+                      <td style={{color:'var(--text-primary)',fontWeight:500}}>{dev.employee_name || dev.employeeName || '—'}</td>
                       <td>{dev.department || '—'}</td>
                       <td><span className={`status-badge ${dev.status}`}>{dev.status}</span></td>
                       <td style={{fontSize:12,color:'var(--text-muted)'}}>
-                        {new Date(dev.lastSeen).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}
+                        {dev.last_seen || dev.lastSeen
+                          ? new Date(dev.last_seen || dev.lastSeen).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})
+                          : '—'}
                       </td>
                       <td>
                         <div className="flex gap-8">
@@ -177,8 +169,7 @@ export default function Dashboard({ apiBase }) {
                         </div>
                       </td>
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>

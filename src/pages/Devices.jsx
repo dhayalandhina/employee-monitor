@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Devices({ apiBase }) {
   const [devices, setDevices] = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -11,12 +10,11 @@ export default function Devices({ apiBase }) {
   const [newEmployee, setNewEmployee] = useState({ name: '', email: '', department: '' });
   const navigate = useNavigate();
 
-  const loadData = () => {
+  const loadData = useCallback(() => {
     fetch(`${apiBase}/api/devices`).then(r => r.json()).then(setDevices).catch(console.error);
-    fetch(`${apiBase}/api/employees`).then(r => r.json()).then(setEmployees).catch(console.error);
-  };
+  }, [apiBase]);
 
-  useEffect(() => { loadData(); }, [apiBase]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = devices.filter(d => {
     const matchSearch = d.id.toLowerCase().includes(search.toLowerCase()) ||

@@ -6,7 +6,6 @@ export default function LiveView({ apiBase }) {
   const { deviceId } = useParams();
   const [devices, setDevices] = useState([]);
   const [selected, setSelected] = useState(deviceId || '');
-  const [device, setDevice] = useState(null);
   const [liveFrame, setLiveFrame] = useState(null);
   const [isLive, setIsLive] = useState(false);
   const [staffIdle, setStaffIdle] = useState(false);
@@ -52,7 +51,7 @@ export default function LiveView({ apiBase }) {
   useEffect(() => {
     fetch(`${apiBase}/api/devices`).then(r => r.json()).then(d => {
       setDevices(d);
-      if (!selected && d.length) setSelected(d[0].id);
+      setSelected(prev => prev || d[0]?.id || '');
     });
     const i = setInterval(() => {
       fetch(`${apiBase}/api/devices`).then(r => r.json()).then(setDevices).catch(() => {});
@@ -73,8 +72,6 @@ export default function LiveView({ apiBase }) {
     setCurrentWindow('');
     setFrameCount(0);
 
-    const dev = devices.find(d => d.id === selected);
-    setDevice(dev || null);
     socketRef.current.emit('live:watch', selected);
     prevWatchRef.current = selected;
 
@@ -86,15 +83,9 @@ export default function LiveView({ apiBase }) {
         if (latest.filename) setLiveFrame(`${apiBase}/screenshots/${latest.filename}`);
       }
     }).catch(() => {});
-  }, [selected]);
+  }, [selected, apiBase, devices]);
 
-  // Update device when list refreshes
-  useEffect(() => {
-    if (selected && devices.length) {
-      const dev = devices.find(d => d.id === selected);
-      if (dev) setDevice(dev);
-    }
-  }, [devices]);
+  const device = devices.find(d => d.id === selected) || null;
 
   const formatTime = () => new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 

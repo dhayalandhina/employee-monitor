@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 export default function Reports({ apiBase }) {
   const [reports, setReports] = useState([]);
@@ -12,13 +12,11 @@ export default function Reports({ apiBase }) {
   }, [apiBase, date]);
 
   const formatDuration = (s) => { const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); return `${h}h ${m}m`; };
-  const COLORS = ['#10b981','#6366f1','#ef4444','#f59e0b'];
-
   // Aggregate for pie chart
   const totals = reports.reduce((acc,r) => {
-    acc.productive += r.productiveTime;
-    acc.unproductive += r.unproductiveTime;
-    acc.idle += r.idleTime;
+    acc.productive += r.productiveTime ?? r.productive_time ?? 0;
+    acc.unproductive += r.unproductiveTime ?? r.unproductive_time ?? 0;
+    acc.idle += r.idleTime ?? r.idle_time ?? 0;
     return acc;
   }, { productive:0, unproductive:0, idle:0 });
 
@@ -32,8 +30,8 @@ export default function Reports({ apiBase }) {
   const weeklyByDate = {};
   weekly.forEach(r => {
     if (!weeklyByDate[r.date]) weeklyByDate[r.date] = { date:r.date, productivity:[], hours:[] };
-    weeklyByDate[r.date].productivity.push(r.productivityScore);
-    weeklyByDate[r.date].hours.push(r.totalActiveTime/3600);
+    weeklyByDate[r.date].productivity.push(r.productivityScore ?? r.productivity_score ?? 0);
+    weeklyByDate[r.date].hours.push((r.totalActiveTime ?? r.total_active_time ?? 0)/3600);
   });
   const weeklyTrend = Object.values(weeklyByDate).map(d => ({
     date: d.date, avgProd: Math.round(d.productivity.reduce((a,b)=>a+b,0)/d.productivity.length),
@@ -68,7 +66,11 @@ export default function Reports({ apiBase }) {
           </div>
           <div className="stat-card">
             <div className="stat-icon purple">📊</div>
-            <div className="stat-value">{reports.length > 0 ? Math.round(reports.reduce((s,r)=>s+r.productivityScore,0)/reports.length) : 0}%</div>
+            <div className="stat-value">
+              {reports.length > 0
+                ? Math.round(reports.reduce((s,r)=>s+(r.productivityScore ?? r.productivity_score ?? 0),0)/reports.length)
+                : 0}%
+            </div>
             <div className="stat-label">Avg Productivity Score</div>
           </div>
         </div>
@@ -129,22 +131,36 @@ export default function Reports({ apiBase }) {
               <tbody>
                 {reports.map(r => (
                   <tr key={r.id}>
-                    <td style={{fontWeight:600,color:'var(--text-primary)'}}>{r.employeeName||r.deviceId}</td>
+                    <td style={{fontWeight:600,color:'var(--text-primary)'}}>{r.employeeName || r.employee_name || r.deviceId || r.device_id}</td>
                     <td>{r.department||'—'}</td>
-                    <td style={{fontSize:12}}>{r.loginTime}</td>
-                    <td style={{fontSize:12}}>{r.logoutTime}</td>
-                    <td>{formatDuration(r.totalActiveTime)}</td>
+                    <td style={{fontSize:12}}>{r.loginTime || r.login_time || '—'}</td>
+                    <td style={{fontSize:12}}>{r.logoutTime || r.logout_time || '—'}</td>
+                    <td>{formatDuration(r.totalActiveTime ?? r.total_active_time ?? 0)}</td>
                     <td style={{width:180}}>
+                      {(() => {
+                        const score = r.productivityScore ?? r.productivity_score ?? 0;
+                        const totalActive = r.totalActiveTime ?? r.total_active_time ?? 0;
+                        const idle = r.idleTime ?? r.idle_time ?? 0;
+                        const idlePct = totalActive > 0 ? (idle / totalActive * 100) : 0;
+                        const unprodPct = Math.max(0, 100 - score - idlePct);
+                        return (
                       <div className="productivity-bar" style={{height:8}}>
-                        <div className="segment" style={{width:`${r.productivityScore}%`,background:'var(--productive)'}}/>
-                        <div className="segment" style={{width:`${100-r.productivityScore-(r.idleTime/r.totalActiveTime*100)}%`,background:'var(--unproductive)'}}/>
-                        <div className="segment" style={{width:`${r.idleTime/r.totalActiveTime*100}%`,background:'var(--idle)'}}/>
+                        <div className="segment" style={{width:`${score}%`,background:'var(--productive)'}}/>
+                        <div className="segment" style={{width:`${unprodPct}%`,background:'var(--unproductive)'}}/>
+                        <div className="segment" style={{width:`${idlePct}%`,background:'var(--idle)'}}/>
                       </div>
+                        );
+                      })()}
                     </td>
                     <td>
-                      <span style={{fontWeight:700,color:r.productivityScore>=70?'var(--productive)':r.productivityScore>=50?'var(--warning)':'var(--danger)'}}>
-                        {r.productivityScore}%
+                      {(() => {
+                        const score = r.productivityScore ?? r.productivity_score ?? 0;
+                        return (
+                      <span style={{fontWeight:700,color:score>=70?'var(--productive)':score>=50?'var(--warning)':'var(--danger)'}}>
+                        {score}%
                       </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

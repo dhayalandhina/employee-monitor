@@ -12,7 +12,7 @@ export default function Timeline({ apiBase }) {
   useEffect(() => {
     fetch(`${apiBase}/api/devices`).then(r=>r.json()).then(d => {
       setDevices(d);
-      if (!selected && d.length) setSelected(d[0].id);
+      setSelected(prev => prev || d[0]?.id || '');
     });
   }, [apiBase]);
 
@@ -25,13 +25,6 @@ export default function Timeline({ apiBase }) {
 
   const formatTime = (ts) => new Date(ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   const formatDuration = (s) => { const m=Math.floor(s/60); return m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`; };
-
-  const categoryColor = (cat) => {
-    if(cat==='productive') return 'var(--productive)';
-    if(cat==='unproductive') return 'var(--unproductive)';
-    if(cat==='idle') return 'var(--idle)';
-    return 'var(--neutral)';
-  };
 
   const stats = {
     productive: logs.filter(l=>l.category==='productive').reduce((s,l)=>s+l.duration,0),
@@ -92,7 +85,7 @@ export default function Timeline({ apiBase }) {
           <div className="timeline">
             {logs.map(log => (
               <div className="timeline-item" key={log.id}>
-                <div className="timeline-time">{formatTime(log.timestamp)} — {formatTime(log.endTime)}</div>
+                <div className="timeline-time">{formatTime(log.timestamp)} — {formatTime(log.end_time || log.endTime || log.timestamp)}</div>
                 <div className="timeline-app">
                   <span>{log.icon}</span>
                   <span>{log.appName}</span>

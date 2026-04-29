@@ -12,7 +12,7 @@ export default function Screenshots({ apiBase }) {
   useEffect(() => {
     fetch(`${apiBase}/api/devices`).then(r=>r.json()).then(d => {
       setDevices(d);
-      if (!selected && d.length) setSelected(d[0].id);
+      setSelected(prev => prev || d[0]?.id || '');
     });
   }, [apiBase]);
 

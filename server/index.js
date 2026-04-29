@@ -217,6 +217,12 @@ function generateDeviceId() {
   return `SYS-${String(count + 1).padStart(3, '0')}`;
 }
 
+function sanitizeEmployeeName(name) {
+  if (!name || typeof name !== 'string') return null;
+  // Remove BOM/zero-width characters that can appear from Windows scripts.
+  return name.replace(/^[\uFEFF\u200B-\u200D]+/, '').trim();
+}
+
 // ============================================================
 // AUTH ROUTES
 // ============================================================
@@ -284,12 +290,13 @@ app.get('/api/devices/:id', (req, res) => {
 // Agent registration (called by agent on first run)
 app.post('/api/devices/register', (req, res) => {
   const { hostname, os: osName, employeeId, employeeName, agentVersion, agentPassword } = req.body;
+  const cleanEmployeeName = sanitizeEmployeeName(employeeName);
 
   // Create employee if name provided but no ID
   let empId = employeeId;
-  if (!empId && employeeName) {
+  if (!empId && cleanEmployeeName) {
     empId = uuidv4();
-    db.prepare('INSERT OR IGNORE INTO employees (id, name) VALUES (?, ?)').run(empId, employeeName);
+    db.prepare('INSERT OR IGNORE INTO employees (id, name) VALUES (?, ?)').run(empId, cleanEmployeeName);
   }
 
   const id = generateDeviceId();
@@ -455,47 +462,23 @@ app.get('/api/dashboard/trends', (req, res) => {
 // WEBSOCKET
 // ============================================================
 io.on('connection', (socket) => {
-  console.log(`🔌 Client connected: ${socket.id}`);
   socket.on('watch:device', (deviceId) => socket.join(`device:${deviceId}`));
   socket.on('unwatch:device', (deviceId) => socket.leave(`device:${deviceId}`));
   socket.on('agent:screen', (data) => io.to(`device:${data.deviceId}`).emit('live:screen', data));
-  socket.on('disconnect', () => console.log(`❌ Disconnected: ${socket.id}`));
+  socket.on('live:watch', (deviceId) => { liveWatching.add(deviceId); });
+  socket.on('live:stop', (deviceId) => { liveWatching.delete(deviceId); });
+  socket.on('disconnect', () => { if (io.engine.clientsCount === 0) liveWatching.clear(); });
 });
-
-// ============================================================
-// SERVE FRONTEND (production)
-// ============================================================
-const distPath = path.join(__dirname, '..', 'dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  // SPA fallback: serve index.html for all non-API GET routes
-  app.use((req, res, next) => {
-    if (req.method !== 'GET') return next();
-    if (req.path.startsWith('/api/') || req.path.startsWith('/screenshots/') || req.path.startsWith('/socket.io/')) {
-      return next();
-    }
-    const indexFile = path.join(distPath, 'index.html');
-    if (fs.existsSync(indexFile)) {
-      res.sendFile(indexFile, (err) => {
-        if (err) next();
-      });
-    } else {
-      next();
-    }
-  });
-}
 
 // ============================================================
 // LIVE STREAMING
 // ============================================================
-const liveWatching = new Set(); // deviceIds being watched
+const liveWatching = new Set();
 
-// Agent checks if it should stream
 app.get('/api/live/check/:deviceId', (req, res) => {
   res.json({ live: liveWatching.has(req.params.deviceId) });
 });
 
-// Agent sends a live frame (base64 screenshot)
 app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
   const { deviceId, frame, appName, windowTitle, isIdle } = req.body;
   if (!deviceId || !frame) return res.status(400).json({ error: 'Missing data' });
@@ -503,20 +486,24 @@ app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
   res.json({ ok: true });
 });
 
-// Socket.io: dashboard tells server which device to watch
-io.on('connection', (socket) => {
-  socket.on('live:watch', (deviceId) => {
-    liveWatching.add(deviceId);
-  });
-  socket.on('live:stop', (deviceId) => {
-    liveWatching.delete(deviceId);
-  });
-  socket.on('disconnect', () => {
-    if (io.engine.clientsCount === 0) {
-      liveWatching.clear();
+// ============================================================
+// SERVE FRONTEND (production) — must be LAST
+// ============================================================
+const distPath = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') return next();
+    if (req.path.startsWith('/api/') || req.path.startsWith('/screenshots/') || req.path.startsWith('/socket.io/')) {
+      return next();
     }
+    const indexFile = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexFile)) {
+      return res.sendFile(indexFile);
+    }
+    next();
   });
-});
+}
 
 // ============================================================
 // START
