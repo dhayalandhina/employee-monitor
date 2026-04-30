@@ -110,7 +110,14 @@ db.exec(`
     window_title TEXT,
     timestamp TEXT NOT NULL,
     file_size INTEGER DEFAULT 0,
+    ai_summary TEXT,
+    ai_category TEXT,
     FOREIGN KEY (device_id) REFERENCES devices(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
   );
 
   CREATE TABLE IF NOT EXISTS daily_reports (
@@ -130,10 +137,16 @@ db.exec(`
     FOREIGN KEY (device_id) REFERENCES devices(id)
   );
 
+
   CREATE INDEX IF NOT EXISTS idx_activity_device_date ON activity_logs(device_id, timestamp);
+
   CREATE INDEX IF NOT EXISTS idx_screenshots_device_date ON screenshots(device_id, timestamp);
+
   CREATE INDEX IF NOT EXISTS idx_reports_device_date ON daily_reports(device_id, date);
 `);
+
+try { db.exec("ALTER TABLE screenshots ADD COLUMN ai_summary TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE screenshots ADD COLUMN ai_category TEXT"); } catch (e) {}
 
 // ============================================================
 // SEED DEFAULT DATA (only on first run)
@@ -222,6 +235,21 @@ function sanitizeEmployeeName(name) {
   // Remove BOM/zero-width characters that can appear from Windows scripts.
   return name.replace(/^[\uFEFF\u200B-\u200D]+/, '').trim();
 }
+
+// ============================================================
+// SETTINGS / API KEYS
+// ============================================================
+app.get('/api/settings/:key', (req, res) => {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(req.params.key);
+  res.json({ value: row ? row.value : null });
+});
+
+app.post('/api/settings', (req, res) => {
+  const { key, value } = req.body;
+  if (!key) return res.status(400).json({ error: 'Missing key' });
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?').run(key, value, value);
+  res.json({ ok: true });
+});
 
 // ============================================================
 // AUTH ROUTES
@@ -382,11 +410,68 @@ const ssStorage = multer.diskStorage({
 });
 const uploadSS = multer({ storage: ssStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
+// ============================================================
+// AI VISION PROCESSING
+// ============================================================
+async function analyzeScreenshotWithAI(screenshotId, filePath) {
+  try {
+    const keysRow = db.prepare("SELECT value FROM settings WHERE key = 'api_keys'").get();
+    if (!keysRow || !keysRow.value) return;
+    const keys = JSON.parse(keysRow.value).filter(k => k && k.trim() !== '');
+    if (keys.length === 0) return;
+
+    const base64Image = fs.readFileSync(filePath, { encoding: 'base64' });
+
+    for (let i = 0; i < keys.length; i++) {
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${keys[i]}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: "gpt-4o-mini", // Uses a fast vision model
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: "Analyze this employee screenshot. Reply exactly in this JSON format: {\"category\": \"productive|unproductive|idle\", \"summary\": \"1 short sentence\"}. Do not use code blocks." },
+                { type: "image_url", image_url: { url: `data:image/png;base64,${base64Image}` } }
+              ]
+            }]
+          })
+        });
+
+        if (response.status === 429 || response.status === 401 || response.status === 403) {
+          console.log(`[AI] Key ${i+1} failed/rate-limited, switching keys...`);
+          continue; // Try next key
+        }
+
+        const data = await response.json();
+        const contentStr = data.choices[0].message.content.trim();
+        const result = JSON.parse(contentStr);
+
+        db.prepare('UPDATE screenshots SET ai_summary = ?, ai_category = ? WHERE id = ?').run(result.summary, result.category.toLowerCase(), screenshotId);
+        io.emit('screenshot:ai_updated', { id: screenshotId, summary: result.summary, category: result.category.toLowerCase() });
+        console.log(`[AI] Analyzed screenshot ${screenshotId}`);
+        return; // Success
+      } catch (err) {
+        if (i === keys.length - 1) console.error("[AI] All API keys exhausted or failed.");
+      }
+    }
+  } catch (err) {
+    console.error("[AI Error]", err.message);
+  }
+}
+
 app.post('/api/screenshots', uploadSS.single('screenshot'), (req, res) => {
   const id = uuidv4();
   const fileSize = req.file ? req.file.size : 0;
   db.prepare('INSERT INTO screenshots (id, device_id, employee_id, filename, app_name, window_title, timestamp, file_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, req.body.deviceId, req.body.employeeId || null, req.file?.filename || '', req.body.appName || '', req.body.windowTitle || '', new Date().toISOString(), fileSize);
   io.emit('screenshot:new', { deviceId: req.body.deviceId, id, filename: req.file?.filename, appName: req.body.appName || '', windowTitle: req.body.windowTitle || '', timestamp: new Date().toISOString() });
+  
+  // Trigger AI Analysis in Background
+  if (req.file) {
+    analyzeScreenshotWithAI(id, req.file.path);
+  }
+
   res.status(201).json({ id, filename: req.file?.filename });
 });
 
@@ -482,6 +567,7 @@ app.get('/api/live/check/:deviceId', (req, res) => {
 app.post('/api/live/frame', express.json({ limit: '10mb' }), (req, res) => {
   const { deviceId, frame, appName, windowTitle, isIdle } = req.body;
   if (!deviceId || !frame) return res.status(400).json({ error: 'Missing data' });
+  console.log(`[Live] Received frame for device: ${deviceId}`);
   io.emit('live:frame', { deviceId, frame, appName: appName || '', windowTitle: windowTitle || '', isIdle: isIdle || false, timestamp: new Date().toISOString() });
   res.json({ ok: true });
 });

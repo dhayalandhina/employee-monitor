@@ -453,15 +453,15 @@ function captureLiveFrame() {
     'Add-Type -AssemblyName System.Windows.Forms',
     'Add-Type -AssemblyName System.Drawing',
     '$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds',
-    '$w = [Math]::Floor($s.Width / 2)',
-    '$h = [Math]::Floor($s.Height / 2)',
+    '$w = [int][Math]::Floor($s.Width / 2)',
+    '$h = [int][Math]::Floor($s.Height / 2)',
     '$full = New-Object System.Drawing.Bitmap($s.Width, $s.Height)',
     '$g = [System.Drawing.Graphics]::FromImage($full)',
     '$g.CopyFromScreen($s.Location, [System.Drawing.Point]::Empty, $s.Size)',
     '$thumb = New-Object System.Drawing.Bitmap($w, $h)',
     '$g2 = [System.Drawing.Graphics]::FromImage($thumb)',
     '$g2.DrawImage($full, 0, 0, $w, $h)',
-    '$thumb.Save("' + tmpFile.replace(/\\/g, '\\\\') + '", [System.Drawing.Imaging.ImageFormat]::Png)',
+    '$thumb.Save(\'' + tmpFile + '\', [System.Drawing.Imaging.ImageFormat]::Png)',
     '$g.Dispose(); $g2.Dispose(); $full.Dispose(); $thumb.Dispose()',
   ].join('\n');
 

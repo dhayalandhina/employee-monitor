@@ -24,6 +24,10 @@ export default function LiveView({ apiBase }) {
     const socket = io(apiBase, { transports: ['websocket', 'polling'] });
     socketRef.current = socket;
 
+    socket.on('connect', () => {
+      if (selectedRef.current) socket.emit('live:watch', selectedRef.current);
+    });
+
     socket.on('live:frame', (data) => {
       if (data.deviceId === selectedRef.current) {
         setLiveFrame(data.frame);
