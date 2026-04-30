@@ -2,8 +2,6 @@
 :: ==========================================
 :: EMPMONITOR 1-CLICK WEB INSTALLER
 :: ==========================================
-:: This script automatically asks for Admin rights, downloads the code directly
-:: from GitHub, installs Node.js, and starts the background agent silently.
 
 :: 1. AUTO-ELEVATE TO ADMINISTRATOR (Like PlayStore asking for permission)
 net session >nul 2>&1
@@ -16,6 +14,13 @@ exit /B
 
 :admin
 color 0A
+echo ==================================================
+echo   EmpMonitor Agent Setup
+echo ==================================================
+echo.
+set /p EMP_NAME="Enter Employee Name (Example: John): "
+if "%EMP_NAME%"=="" set EMP_NAME=%USERNAME%
+echo.
 echo ==================================================
 echo   Downloading and Installing EmpMonitor...
 echo ==================================================
@@ -60,7 +65,7 @@ echo [5/5] Securing Background Service...
     echo @echo off
     echo cd /d "%TARGET_DIR%"
     echo :loop
-    echo node agent.js "%SERVER_URL%" "%%USERNAME%%" "admin123"
+    echo node agent.js "%SERVER_URL%" "%%EMP_NAME%%" "admin123"
     echo timeout /t 5 /nobreak ^>nul
     echo goto loop
 ) > "%TARGET_DIR%\start-agent.bat"
