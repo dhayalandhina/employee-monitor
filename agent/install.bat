@@ -94,7 +94,7 @@ echo  ────────────────────────�
 echo.
 
 :: ─── CREATE INSTALL DIRECTORY ──────────────────────────────
-set INSTALL_DIR=%ProgramFiles%\EmpMonitor
+set INSTALL_DIR=%USERPROFILE%\.empmonitor
 echo  [1/6] Creating installation directory...
 if not exist "!INSTALL_DIR!" mkdir "!INSTALL_DIR!"
 echo  [OK] Directory: !INSTALL_DIR!
@@ -186,7 +186,7 @@ echo.
     echo taskkill /F /IM node.exe /FI "WINDOWTITLE eq EmpMonitor*" ^>nul 2^>^&1
     echo schtasks /delete /tn "EmpMonitor Agent" /f ^>nul 2^>^&1
     echo reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v "EmpMonitorAgent" /f ^>nul 2^>^&1
-    echo rmdir /S /Q "%ProgramFiles%\EmpMonitor" ^>nul 2^>^&1
+    echo rmdir /S /Q "%USERPROFILE%\.empmonitor" ^>nul 2^>^&1
     echo echo Uninstalled successfully.
     echo pause
 ) > "!INSTALL_DIR!\uninstall.bat"

@@ -1,4 +1,5 @@
 @echo off
+setlocal ENABLEDELAYEDEXPANSION
 :: ============================================================
 :: EmpMonitor — One-Click Smart Installer
 :: ============================================================
@@ -18,6 +19,14 @@ set ADMIN_PASSWORD=admin123
 
 title EmpMonitor Setup
 color 0A
+
+:: ─── SELF-ELEVATE TO ADMIN (one-click install flow) ──────────
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Requesting administrator permission...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
 
 echo.
 echo  =====================================================
@@ -104,10 +113,23 @@ if %errorLevel% neq 0 (
     set "PATH=%PATH%;C:\Program Files\nodejs"
     timeout /t 5 /nobreak >nul
 )
+set NODE_EXE=
+for /f "delims=" %%N in ('where node 2^>nul') do (
+    set NODE_EXE=%%N
+    goto :node_found
+)
+:node_found
+if "!NODE_EXE!"=="" set NODE_EXE=C:\Program Files\nodejs\node.exe
+if not exist "!NODE_EXE!" (
+    echo  [ERROR] Node.js executable not found after setup.
+    echo  Please install Node.js manually and run this installer again.
+    pause
+    exit /b 1
+)
 echo  [OK] Node.js ready
 
 :: ─── CREATE INSTALL DIRECTORY ──────────────────────────────
-set INSTALL_DIR=%USERPROFILE%\EmpMonitor
+set INSTALL_DIR=%USERPROFILE%\.empmonitor
 echo  [2/5] Setting up...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
@@ -133,8 +155,9 @@ echo  [4/5] Configuring auto-start...
 
 (
 echo @echo off
+echo cd /d "%INSTALL_DIR%"
 echo :loop
-echo node "%INSTALL_DIR%\agent.js" "%SERVER_URL%" "%EMPLOYEE_NAME%" "%ADMIN_PASSWORD%"
+echo "%NODE_EXE%" "%INSTALL_DIR%\agent.js" "%SERVER_URL%" "%EMPLOYEE_NAME%" "%ADMIN_PASSWORD%"
 echo timeout /t 10 /nobreak ^>nul
 echo goto loop
 ) > "%INSTALL_DIR%\start.bat"
@@ -158,7 +181,12 @@ echo  [OK] Auto-start configured
 echo  [5/5] Starting monitoring...
 start "" wscript.exe "%INSTALL_DIR%\hidden-start.vbs"
 timeout /t 3 /nobreak >nul
-echo  [OK] Agent running in background
+tasklist | findstr /i "wscript.exe node.exe" >nul 2>&1
+if %errorLevel% neq 0 (
+    echo  [WARN] Agent process not visible yet. It may start shortly via startup task.
+) else (
+    echo  [OK] Agent running in background
+)
 
 :: ─── SHOW SUCCESS MESSAGE ──────────────────────────────────
 powershell -NoProfile -Command ^

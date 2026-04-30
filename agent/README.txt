@@ -24,6 +24,11 @@ WHAT IT DOES:
   - Takes periodic screenshots
   - Sends data to the company monitoring server
 
+INSTALL PATH (important):
+  - Agent runtime directory: %USERPROFILE%\.empmonitor
+  - Logs and config are stored in the same folder.
+  - If you manually start agent, use files from this folder.
+
 TO UNINSTALL:
   - Run "uninstall.bat" as Administrator
   - Enter the admin password (given by admin)

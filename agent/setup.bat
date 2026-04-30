@@ -26,7 +26,7 @@ echo  Server: %SERVER_URL%
 echo.
 
 :: Create install directory
-set INSTALL_DIR=%USERPROFILE%\EmpMonitor
+set INSTALL_DIR=%USERPROFILE%\.empmonitor
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 
 :: Copy agent.js to install directory
@@ -41,6 +41,7 @@ echo  [OK] Agent installed to %INSTALL_DIR%
 :: Create the start script (restarts if it crashes)
 (
 echo @echo off
+echo cd /d "%INSTALL_DIR%"
 echo :loop
 echo node "%INSTALL_DIR%\agent.js" "%SERVER_URL%" "%EMPLOYEE_NAME%" "%ADMIN_PASSWORD%"
 echo timeout /t 10 /nobreak ^>nul

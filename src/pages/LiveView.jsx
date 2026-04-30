@@ -12,6 +12,7 @@ export default function LiveView({ apiBase }) {
   const [currentApp, setCurrentApp] = useState('');
   const [currentWindow, setCurrentWindow] = useState('');
   const [frameCount, setFrameCount] = useState(0);
+  const [lastFrameAt, setLastFrameAt] = useState(0);
   const socketRef = useRef(null);
   const selectedRef = useRef('');
   const prevWatchRef = useRef('');
@@ -27,6 +28,7 @@ export default function LiveView({ apiBase }) {
       if (data.deviceId === selectedRef.current) {
         setLiveFrame(data.frame);
         setIsLive(true);
+        setLastFrameAt(Date.parse(data.timestamp) || Date.now());
         setStaffIdle(data.isIdle || false);
         setCurrentApp(data.appName || '');
         setCurrentWindow(data.windowTitle || '');
@@ -71,21 +73,25 @@ export default function LiveView({ apiBase }) {
     setCurrentApp('');
     setCurrentWindow('');
     setFrameCount(0);
+    setLastFrameAt(0);
 
     socketRef.current.emit('live:watch', selected);
     prevWatchRef.current = selected;
-
-    // Load last screenshot as initial view
-    const today = new Date().toISOString().split('T')[0];
-    fetch(`${apiBase}/api/screenshots/${selected}?date=${today}`).then(r => r.json()).then(ss => {
-      if (ss && ss.length) {
-        const latest = ss[ss.length - 1];
-        if (latest.filename) setLiveFrame(`${apiBase}/screenshots/${latest.filename}`);
-      }
-    }).catch(() => {});
-  }, [selected, apiBase, devices]);
+  }, [selected, apiBase]);
 
   const device = devices.find(d => d.id === selected) || null;
+
+  // CCTV-style behavior: if frames stop for a while, mark stream stale.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!lastFrameAt) return;
+      if (Date.now() - lastFrameAt > 8000) {
+        setIsLive(false);
+        setLiveFrame(null);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastFrameAt]);
 
   const formatTime = () => new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
